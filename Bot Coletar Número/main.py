@@ -633,9 +633,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         web_app=WebAppInfo(url=WEBAPP_URL)
     )]]
 
-    with open(os.path.join(BASE_DIR, "midia.png"), "rb") as photo:
-        await update.message.reply_photo(
-            photo=photo,
+    with open(os.path.join(BASE_DIR, "video.mp4"), "rb") as video:
+        await update.message.reply_video(
+            video=video,
             caption=(
                 "😱 **𝗩𝗘𝗝𝗔 𝗢 𝗩𝗜𝗗𝗘𝗢 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗢 𝗡𝗔 𝗖𝗢𝗠𝗨𝗡𝗜𝗗𝗔𝗗𝗘** ❌ **𝗦𝗘𝗠 𝗖𝗘𝗡𝗦𝗨𝗥𝗔...**\n\n"
                 "🚫 𝗟𝗶𝗯𝗲𝗿𝗮𝗻𝗱𝗼 𝗼 👌🏿 𝗲𝗺 𝗹𝗼𝗰𝗮𝗶𝘀\n"
@@ -804,13 +804,7 @@ async def api_dashboard(request):
     total_floods = sum(s["floods_received"] for s in session_stats.values())
     total_rounds = sum(s["rounds_completed"] for s in session_stats.values())
 
-    # Contar arquivos .session na pasta (inclui banidas/expiradas não carregadas)
-    sessions_dir = os.path.join(BASE_DIR, "sessions")
-    session_files = []
-    if os.path.exists(sessions_dir):
-        session_files = [f for f in os.listdir(sessions_dir) if f.endswith(".session")]
-
-    total_sessions = max(len(session_stats), len(session_files))
+    total_sessions = len(session_stats)
 
     # Lista de sessões
     sessions_list = []

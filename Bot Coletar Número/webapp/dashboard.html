@@ -103,6 +103,23 @@
     /* Fade in */
     @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
     .fade-in{animation:fadeUp .4s ease}
+
+    /* Log Terminal */
+    .log-wrap{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:16px;overflow:hidden;margin-top:20px}
+    .log-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06)}
+    .log-title{font-size:15px;font-weight:700}
+    .log-count{font-size:12px;color:rgba(255,255,255,0.3);font-weight:500}
+    .log-terminal{background:#050508;padding:16px;height:360px;overflow-y:auto;font-family:'JetBrains Mono','Fira Code','Cascadia Code',monospace;font-size:12px;line-height:1.7}
+    .log-terminal::-webkit-scrollbar{width:6px}
+    .log-terminal::-webkit-scrollbar-track{background:transparent}
+    .log-terminal::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+    .log-line{color:rgba(255,255,255,0.55);word-break:break-all}
+    .log-line .log-time{color:rgba(255,255,255,0.2);margin-right:8px}
+    .log-line.log-ok{color:#34d399}
+    .log-line.log-err{color:#f87171}
+    .log-line.log-warn{color:#fbbf24}
+    .log-line.log-info{color:#60a5fa}
+    .log-line.log-disparo{color:#a78bfa}
   </style>
 </head>
 <body>
@@ -198,6 +215,17 @@
           </div>
         </div>
       </div>
+
+      <!-- Log Terminal -->
+      <div class="log-wrap">
+        <div class="log-header">
+          <div class="log-title">🖥️ Logs em Tempo Real</div>
+          <div class="log-count" id="log-count">0 linhas</div>
+        </div>
+        <div class="log-terminal" id="log-terminal">
+          <div class="log-line" style="color:rgba(255,255,255,0.2)">Aguardando logs...</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -244,15 +272,23 @@
 
     async function fetchData() {
       try {
-        const res = await fetch('/api/dashboard?token=' + encodeURIComponent(token));
-        if (res.status === 403) {
+        const [statsRes, logsRes] = await Promise.all([
+          fetch('/api/dashboard?token=' + encodeURIComponent(token)),
+          fetch('/api/dashboard/logs?token=' + encodeURIComponent(token))
+        ]);
+        if (statsRes.status === 403) {
           localStorage.removeItem('dash_token');
           location.reload();
           return;
         }
-        const d = await res.json();
+        const d = await statsRes.json();
         renderStats(d);
         renderTable(d.sessions || []);
+
+        if (logsRes.ok) {
+          const logsData = await logsRes.json();
+          renderLogs(logsData.logs || []);
+        }
       } catch (e) {
         console.error('Fetch error:', e);
       }
@@ -271,12 +307,6 @@
       const total_attempts = d.total_messages_sent + d.total_errors;
       const rate = total_attempts > 0 ? Math.round((d.total_messages_sent / total_attempts) * 100) : 0;
       document.getElementById('s-rate').textContent = rate + '%';
-
-      // Uptime
-      const up = d.uptime || 0;
-      const h = Math.floor(up / 3600);
-      const m = Math.floor((up % 3600) / 60);
-      document.getElementById('uptime').textContent = `${h}h ${m}m`;
     }
 
     function renderTable(sessions) {
@@ -354,6 +384,38 @@
       const d = document.createElement('div');
       d.textContent = s;
       return d.innerHTML;
+    }
+
+    // === LOGS ===
+    let lastLogCount = 0;
+    function renderLogs(logs) {
+      const terminal = document.getElementById('log-terminal');
+      document.getElementById('log-count').textContent = logs.length + ' linhas';
+      if (logs.length === 0) return;
+
+      // Only re-render if new logs arrived
+      if (logs.length === lastLogCount) return;
+      lastLogCount = logs.length;
+
+      let html = '';
+      for (const log of logs) {
+        const d = new Date(log.t * 1000);
+        const ts = d.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const msg = esc(log.msg);
+
+        let cls = '';
+        if (msg.includes('✅') || msg.includes('LOGIN OK') || msg.includes('Rodada completa')) cls = 'log-ok';
+        else if (msg.includes('❌') || msg.includes('ERROR') || msg.includes('💀') || msg.includes('BANIDA')) cls = 'log-err';
+        else if (msg.includes('⚠️') || msg.includes('WARN') || msg.includes('FLOOD') || msg.includes('🚫')) cls = 'log-warn';
+        else if (msg.includes('🚀') || msg.includes('DISPARO') || msg.includes('🔄')) cls = 'log-disparo';
+        else if (msg.includes('[API]') || msg.includes('[BOT]') || msg.includes('[DEBUG]')) cls = 'log-info';
+
+        html += `<div class="log-line ${cls}"><span class="log-time">${ts}</span>${msg}</div>`;
+      }
+      terminal.innerHTML = html;
+
+      // Auto-scroll to bottom
+      terminal.scrollTop = terminal.scrollHeight;
     }
   </script>
 </body>

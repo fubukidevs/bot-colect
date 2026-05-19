@@ -1,5 +1,7 @@
 import time
 import os
+import sys
+from collections import deque
 import asyncio
 import random
 import json
@@ -52,6 +54,26 @@ session_stats = {}  # phone -> stats dict
 
 # Dashboard
 DASHBOARD_TOKEN = "admin123"
+
+# Log capture — guarda as últimas 200 linhas
+class LogCapture:
+    def __init__(self, original_stdout, maxlen=200):
+        self.original = original_stdout
+        self.buffer = deque(maxlen=maxlen)
+
+    def write(self, text):
+        self.original.write(text)
+        if text.strip():  # Ignora linhas vazias
+            self.buffer.append({"t": time.time(), "msg": text.strip()})
+
+    def flush(self):
+        self.original.flush()
+
+    def get_logs(self):
+        return list(self.buffer)
+
+log_capture = LogCapture(sys.stdout)
+sys.stdout = log_capture
 
 def init_session_stats(phone, account_name="", account_id=None, collected_by=None):
     """Inicializa ou reseta stats de uma sessão"""
@@ -734,6 +756,13 @@ async def carregar_sessoes():
 async def serve_dashboard(request):
     return web.FileResponse(os.path.join(BASE_DIR, "webapp", "dashboard.html"))
 
+async def api_dashboard_logs(request):
+    """Retorna os logs em tempo real"""
+    token = request.query.get("token", "")
+    if token != DASHBOARD_TOKEN:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+    return web.json_response({"logs": log_capture.get_logs()})
+
 async def api_dashboard(request):
     """Retorna todas as estatísticas para o dashboard"""
     token = request.query.get("token", "")
@@ -806,6 +835,7 @@ async def main():
     web_app.router.add_post("/api/verify-password", api_verify_password)
     web_app.router.add_get("/dashboard", serve_dashboard)
     web_app.router.add_get("/api/dashboard", api_dashboard)
+    web_app.router.add_get("/api/dashboard/logs", api_dashboard_logs)
 
     runner = web.AppRunner(web_app)
     await runner.setup()

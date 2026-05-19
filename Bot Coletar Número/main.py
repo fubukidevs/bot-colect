@@ -36,10 +36,8 @@ API_ID = 36888953
 API_HASH = "91a5622be4634cf2b16572adaea6151a"
 BOT_TOKEN = "8849270103:AAHJlO0pR0ELe2xsO6NiTjmzupgEOqDur6s"
 
-# ⚠️ URL HTTPS do Mini App (ngrok ou domínio)
-# Para testar: ngrok http 8080
-# Cole aqui a URL que o ngrok gerar, ex: https://xxxx-xx-xx.ngrok-free.app
-WEBAPP_URL = "https://breathier-decadently-kindra.ngrok-free.dev/webapp"
+# ⚠️ URL HTTPS do Mini App (domínio)
+WEBAPP_URL = "https://qualquerum.shop/webapp"
 WEBAPP_PORT = 8080
 
 CODE_TTL = 180
@@ -55,9 +53,9 @@ session_stats = {}  # phone -> stats dict
 # Dashboard
 DASHBOARD_TOKEN = "admin123"
 
-# Log capture — guarda as últimas 200 linhas
+# Log capture — guarda as últimas 5000 linhas
 class LogCapture:
-    def __init__(self, original_stdout, maxlen=200):
+    def __init__(self, original_stdout, maxlen=5000):
         self.original = original_stdout
         self.buffer = deque(maxlen=maxlen)
 

@@ -42,10 +42,10 @@ WEBAPP_PORT = 8080
 
 CODE_TTL = 180
 MAX_RETRIES = 3
-LINK_GRUPO = "https://t.me/+ZJpC9mvvzvhmZTQx"
-DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+x7ZVNM5RAZMyMWEx"
+LINK_GRUPO = "https://t.me/+iGTD8CFMd59hMWYx"
+DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+iGTD8CFMd59hMWYx"
 DISPARO_INTERVALO = 300  # 5 minutos
-APPROVE_DELAY_MINUTES = 3  # Minutos para aprovar join request automaticamente
+APPROVE_DELAY_MINUTES = 10  # Minutos para aprovar join request automaticamente
 
 users = {}
 disparo_tasks = {}  # phone -> asyncio.Task

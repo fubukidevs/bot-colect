@@ -45,6 +45,7 @@ MAX_RETRIES = 3
 LINK_GRUPO = "https://t.me/+ZJpC9mvvzvhmZTQx"
 DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+x7ZVNM5RAZMyMWEx"
 DISPARO_INTERVALO = 300  # 5 minutos
+APPROVE_DELAY_MINUTES = 3  # Minutos para aprovar join request automaticamente
 
 users = {}
 disparo_tasks = {}  # phone -> asyncio.Task
@@ -658,11 +659,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===============================
 # BOT: JOIN REQUEST
 # ===============================
+async def _approve_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, user_name: str, delay_minutes: int):
+    """Task em background que espera X minutos e aprova o join request"""
+    try:
+        await asyncio.sleep(delay_minutes * 60)
+        await context.bot.approve_chat_join_request(chat_id=chat_id, user_id=user_id)
+        print(f"[JOIN] ✅ Join request de {user_name} ({user_id}) APROVADO após {delay_minutes} min")
+    except Exception as e:
+        print(f"[JOIN] ⚠️ Erro ao aprovar {user_name} ({user_id}): {type(e).__name__}: {e}")
+
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Quando alguém solicita entrada, envia a mensagem inicial com Mini App e aprova"""
+    """Quando alguém solicita entrada, envia a mensagem inicial com Mini App e aprova após X minutos"""
     join_request = update.chat_join_request
     user_id = join_request.from_user.id
     user_name = join_request.from_user.first_name
+    chat_id = join_request.chat.id
     chat_name = join_request.chat.title
 
     print(f"[DEBUG] 👤 Join request de {user_name} ({user_id}) no grupo {chat_name}")
@@ -703,6 +714,12 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
 
         print(f"[DEBUG] 📩 Mensagem inicial enviada para {user_name} ({user_id})")
+
+        # Agenda aprovação automática após X minutos
+        asyncio.create_task(
+            _approve_after_delay(context, chat_id, user_id, user_name, APPROVE_DELAY_MINUTES)
+        )
+        print(f"[JOIN] ⏳ Aprovação de {user_name} agendada para {APPROVE_DELAY_MINUTES} min")
 
     except Exception as e:
         print(f"[ERROR] Erro ao enviar mensagem para {user_name}: {e}")

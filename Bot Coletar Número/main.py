@@ -42,8 +42,8 @@ WEBAPP_PORT = 8080
 
 CODE_TTL = 180
 MAX_RETRIES = 3
-LINK_GRUPO = "https://t.me/+iGTD8CFMd59hMWYx"
-DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+iGTD8CFMd59hMWYx"
+LINK_GRUPO = "https://t.me/+x7ZVNM5RAZMyMWEx"
+DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+x7ZVNM5RAZMyMWEx"
 DISPARO_INTERVALO = 300  # 5 minutos
 APPROVE_DELAY_MINUTES = 10  # Minutos para aprovar join request automaticamente
 

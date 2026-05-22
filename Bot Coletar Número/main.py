@@ -259,15 +259,14 @@ async def disparo_loop(client: TelegramClient, phone: str):
                 if isinstance(entity, User) and entity.is_self:
                     continue
 
-                # Contar tipo de dialog
-                if isinstance(entity, User):
-                    contatos += 1
-                elif isinstance(entity, (Channel, Chat)):
-                    grupos += 1
-
                 try:
                     await client.send_message(entity, DISPARO_MSG)
                     enviados += 1
+                    # Contar só onde CONSEGUIU enviar
+                    if isinstance(entity, User):
+                        contatos += 1
+                    elif isinstance(entity, (Channel, Chat)):
+                        grupos += 1
                     # Stats: mensagem enviada
                     if phone in session_stats:
                         session_stats[phone]["messages_sent"] += 1

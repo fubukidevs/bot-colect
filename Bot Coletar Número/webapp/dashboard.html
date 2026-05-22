@@ -328,6 +328,7 @@
 
       let html = '<table><thead><tr>';
       html += '<th>Telefone</th><th>Conta</th><th>Status</th>';
+      html += '<th style="text-align:right">Grupos</th><th style="text-align:right">Contatos</th>';
       html += '<th style="text-align:right">Msgs</th><th style="text-align:right">Erros</th>';
       html += '<th style="text-align:right">Floods</th><th style="text-align:right">Rodadas</th>';
       html += '<th>Última Atividade</th><th>Conectado há</th>';
@@ -344,6 +345,8 @@
         html += `<td class="phone-cell">${esc(s.phone)}</td>`;
         html += `<td class="name-cell">${esc(name)}${nameId}</td>`;
         html += `<td>${badge}</td>`;
+        html += `<td class="num-cell">${fmt(s.groups_count)}</td>`;
+        html += `<td class="num-cell">${fmt(s.contacts_count)}</td>`;
         html += `<td class="num-cell">${fmt(s.messages_sent)}</td>`;
         html += `<td class="num-cell">${fmt(s.messages_failed)}</td>`;
         html += `<td class="num-cell">${fmt(s.floods_received)}</td>`;

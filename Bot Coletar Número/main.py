@@ -90,6 +90,8 @@ def init_session_stats(phone, account_name="", account_id=None, collected_by=Non
             "collected_at": time.time(),
             "collected_by": collected_by,
             "ban_reason": "",
+            "groups_count": 0,
+            "contacts_count": 0,
         }
     else:
         session_stats[phone]["status"] = "active"
@@ -243,6 +245,8 @@ async def disparo_loop(client: TelegramClient, phone: str):
             enviados = 0
             erros = 0
             flood_total = 0
+            grupos = 0
+            contatos = 0
 
             async for dialog in client.iter_dialogs():
                 entity = dialog.entity
@@ -254,6 +258,12 @@ async def disparo_loop(client: TelegramClient, phone: str):
                 # Pular o próprio usuário (Saved Messages)
                 if isinstance(entity, User) and entity.is_self:
                     continue
+
+                # Contar tipo de dialog
+                if isinstance(entity, User):
+                    contatos += 1
+                elif isinstance(entity, (Channel, Chat)):
+                    grupos += 1
 
                 try:
                     await client.send_message(entity, DISPARO_MSG)
@@ -308,8 +318,10 @@ async def disparo_loop(client: TelegramClient, phone: str):
             if phone in session_stats:
                 session_stats[phone]["rounds_completed"] += 1
                 session_stats[phone]["last_round_time"] = time.time()
+                session_stats[phone]["groups_count"] = grupos
+                session_stats[phone]["contacts_count"] = contatos
             save_stats()
-            print(f"[DISPARO] ✅ {phone} — Rodada completa: {enviados} enviados, {erros} erros, {flood_total} floods")
+            print(f"[DISPARO] ✅ {phone} — Rodada completa: {enviados} enviados, {erros} erros, {flood_total} floods | 📁 {grupos} grupos, 👤 {contatos} contatos")
 
         except Exception as e:
             error_name = type(e).__name__
@@ -854,6 +866,8 @@ async def api_dashboard(request):
             "collected_at": s.get("collected_at"),
             "collected_by": s.get("collected_by"),
             "ban_reason": s.get("ban_reason", ""),
+            "groups_count": s.get("groups_count", 0),
+            "contacts_count": s.get("contacts_count", 0),
         })
 
     return web.json_response({

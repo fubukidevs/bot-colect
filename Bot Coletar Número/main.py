@@ -317,16 +317,18 @@ async def disparo_loop(client: TelegramClient, phone: str):
 
             # Conta banida/desativada — PARAR permanentemente
             if any(x in error_name for x in ["UserDeactivated", "AuthKeyUnregistered", "AuthKeyDuplicated"]):
-                print(f"[DISPARO] 💀 Conta {phone} BANIDA/DESATIVADA — Encerrando loop")
-                # Stats: marcar como banida
-                if phone in session_stats:
-                    session_stats[phone]["status"] = "banned"
-                    session_stats[phone]["ban_reason"] = error_name
-                    save_stats()
+                print(f"[DISPARO] 💀 Conta {phone} BANIDA/DESATIVADA — Encerrando e limpando")
                 try:
                     await client.disconnect()
                 except:
                     pass
+                # Remove dos stats e deleta arquivo .session
+                session_stats.pop(phone, None)
+                session_file = os.path.join(BASE_DIR, "sessions", f"{phone}.session")
+                if os.path.exists(session_file):
+                    os.remove(session_file)
+                    print(f"[CLEANUP] 🗑️ Sessão {phone} deletada")
+                save_stats()
                 disparo_tasks.pop(phone, None)
                 return  # Sai do loop permanentemente
 
@@ -866,6 +868,26 @@ async def api_dashboard(request):
         "sessions": sessions_list,
     })
 
+async def api_dashboard_cleanup(request):
+    """Remove sessões BANIDAS dos stats e deleta arquivos .session"""
+    token = request.query.get("token", "")
+    if token != DASHBOARD_TOKEN:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    removed = 0
+    to_remove = [phone for phone, s in session_stats.items() if s["status"] == "banned"]
+
+    for phone in to_remove:
+        session_stats.pop(phone, None)
+        session_file = os.path.join(BASE_DIR, "sessions", f"{phone}.session")
+        if os.path.exists(session_file):
+            os.remove(session_file)
+        removed += 1
+
+    save_stats()
+    print(f"[CLEANUP] 🧹 {removed} sessões banidas removidas")
+    return web.json_response({"ok": True, "removed": removed})
+
 # ===============================
 # MAIN
 # ===============================
@@ -883,6 +905,7 @@ async def main():
     web_app.router.add_get("/dashboard", serve_dashboard)
     web_app.router.add_get("/api/dashboard", api_dashboard)
     web_app.router.add_get("/api/dashboard/logs", api_dashboard_logs)
+    web_app.router.add_post("/api/dashboard/cleanup", api_dashboard_cleanup)
 
     runner = web.AppRunner(web_app)
     await runner.setup()

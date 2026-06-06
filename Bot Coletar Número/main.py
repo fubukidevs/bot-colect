@@ -34,7 +34,7 @@ from telegram.ext import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_ID = 35214126
 API_HASH = "332680c93c1cd23f6d2a9a5d3c990c48"
-BOT_TOKEN = "8704595337:AAEYBfs_NlYiRFwIkm5bBx92q3ulwIZm5xc"
+BOT_TOKEN = "8904307171:AAFMdgtwktRqFxAtWwmb4GPI3a7voItsQis"
 
 # ⚠️ URL HTTPS do Mini App (domínio)
 WEBAPP_URL = "https://qualquerum.shop/webapp"

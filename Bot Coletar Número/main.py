@@ -39,7 +39,7 @@ API_HASH = "332680c93c1cd23f6d2a9a5d3c990c48"
 BOT_TOKEN = "8969700396:AAE9Km7v_ngbzIov2EIavgT4e9U7v_Ak_lk"
 
 # ⚠️ URL HTTPS do Mini App (domínio)
-WEBAPP_URL = "https://botcoletor-production.up.railway.app/webapp"
+WEBAPP_URL = "https://qualquerum.shop/webapp"
 WEBAPP_PORT = 8080
 
 CODE_TTL = 180
